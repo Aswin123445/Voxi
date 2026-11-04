@@ -1,0 +1,29 @@
+# Backend framework
+fastapi
+uvicorn[standard]
+
+# Database
+sqlalchemy[asyncio]
+alembic
+psycopg[binary]
+
+# Validation and settings
+pydantic
+pydantic-settings
+python-dotenv
+
+# Authentication
+python-jose[cryptography]
+passlib[bcrypt]
+
+# WebSocket
+websockets
+
+# HTTP client
+httpx
+
+# Async support
+asyncpg
+
+# Logging
+loguru
