@@ -2,6 +2,9 @@
 fastapi
 uvicorn[standard]
 
+#network
+httpx
+
 # Database
 sqlalchemy[asyncio]
 alembic
@@ -9,6 +12,7 @@ psycopg[binary]
 
 # Validation and settings
 pydantic
+pydantic[email]
 pydantic-settings
 python-dotenv
 
@@ -27,3 +31,17 @@ asyncpg
 
 # Logging
 loguru
+
+#tts 
+kokoro 
+soundfile 
+faster-whisper
+
+av
+aiortc
+
+pytest
+pytest-asyncio
+pytest-cov 
+
+silero-vad

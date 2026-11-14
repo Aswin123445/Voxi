@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
+from app.enums.interview_stage import InterviewStage
 
 class Interview(Base):
     __tablename__ = "interviews"
@@ -36,8 +37,11 @@ class Interview(Base):
         String(30), nullable=False, server_default=text("'CREATED'")
     )
 
-    current_stage: Mapped[str | None] = mapped_column(String(50), nullable=True)
-
+    current_stage: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default=InterviewStage.INTRODUCTION.value,
+    )
     # Interview timestamps
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     APP_NAME: str = "Voxi"
     APP_ENV: str = "development"
     DEBUG: bool = True
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "qwen3.5:0.8b"
+    OLLAMA_TIMEOUT: float = 180.0
 
     # Database settings
     DATABASE_URL: str
