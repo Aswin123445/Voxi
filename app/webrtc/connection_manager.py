@@ -54,34 +54,55 @@ class ConnectionManager:
             transcript=transcript,
         )
 
-    # --------------------------------------------------
-    # Audio receiver creation
-    # --------------------------------------------------
+    async def handle_runtime_status(
+        self,
+        interview_id: UUID,
+        status: str,
+    ) -> None:
+        if self.interview_orchestrator is None:
+            logger.warning(
+                "[CONNECTION MANAGER] Cannot publish runtime status. "
+                "InterviewOrchestrator is not initialized."
+            )
+            return
+
+        await self.interview_orchestrator.publish_runtime_status(
+            interview_id=interview_id,
+            status=status,
+        )
+
+        # --------------------------------------------------
+        # Audio receiver creation
+        # --------------------------------------------------
+
 
     def create_audio_receiver(
         self,
         interview_id: UUID,
     ) -> AudioReceiver:
-
+    
         async def on_transcript(transcript: str):
             await self.handle_transcript(
                 interview_id=interview_id,
                 transcript=transcript,
             )
-
+    
+        async def on_runtime_status(status: str):
+            await self.handle_runtime_status(
+                interview_id=interview_id,
+                status=status,
+            )
+    
         receiver = AudioReceiver(
             stt_service=self.stt_service,
             on_transcript=on_transcript,
+            on_runtime_status=on_runtime_status,
         )
-
+    
         self.audio_receivers[interview_id] = receiver
-
+    
         return receiver
-
-    # --------------------------------------------------
-    # Audio task monitoring
-    # --------------------------------------------------
-
+    
     def on_audio_task_done(
         self,
         task: asyncio.Task,
@@ -115,7 +136,7 @@ class ConnectionManager:
         existing_connection = self.connections.get(interview_id)
 
         if existing_connection:
-        
+
             if existing_connection.connectionState != "closed":
                 logger.warning(
                     "[CONNECTION MANAGER] Connection already exists: %s",

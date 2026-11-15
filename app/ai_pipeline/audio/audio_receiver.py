@@ -20,6 +20,7 @@ class AudioReceiver:
         self,
         stt_service: STTService,
         on_transcript: Callable[[str], Awaitable[None]],
+        on_runtime_status: Callable[[str], Awaitable[None]] | None = None,
     ):
         self.audio_processor = AudioProcessor()
         self.audio_chunker = AudioChunker(chunk_size=512)
@@ -27,16 +28,27 @@ class AudioReceiver:
         self.audio_buffer = AudioBuffer()
         self.stt_service = stt_service
         self.on_transcript = on_transcript
+        self.on_runtime_status = on_runtime_status
 
-        # Track background transcription tasks.
-        # self.utterance_tasks: set[asyncio.Task] = set()
-
-        # experiment
         self.utterance_queue = asyncio.Queue(maxsize=5)
         self.utterance_worker_task = None
 
+    async def publish_runtime_status(self, status: str) -> None:
+        if self.on_runtime_status is None:
+            return
+
+        try:
+            await self.on_runtime_status(status)
+        except Exception:
+            logger.exception(
+                "[AUDIO RECEIVER] Failed to publish runtime status: %s",
+                status,
+            )
 
     async def schedule_utterance(self, audio_segment):
+
+        await self.publish_runtime_status("PROCESSING")
+
         if self.utterance_worker_task is None or self.utterance_worker_task.done():
             self.utterance_worker_task = asyncio.create_task(self.process_utterance_queue())
 
@@ -165,6 +177,7 @@ class AudioReceiver:
                             "[AUDIO RECEIVER] Speech started: %s",
                             event,
                         )
+                        await self.publish_runtime_status("CANDIDATE_SPEAKING")
 
                         self.audio_buffer.start_recording()
 
@@ -180,7 +193,7 @@ class AudioReceiver:
 
                         if audio_segment is not None and audio_segment.size > 0:
                             await self.schedule_utterance(audio_segment)
-
+                            await self.publish_runtime_status("PROCESSING")
 
         except MediaStreamError:
             logger.warning(
@@ -219,6 +232,7 @@ class AudioReceiver:
                         continue
 
                     if "start" in event:
+                        await self.publish_runtime_status("CANDIDATE_SPEAKING")
                         self.audio_buffer.start_recording()
 
                     elif "end" in event:

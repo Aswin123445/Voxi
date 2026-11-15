@@ -85,13 +85,33 @@ async def webrtc_signaling(
         # 4. Keep WebSocket alive for interview events
         while True:
             message = await websocket.receive_json()
-
-            logger.debug(
-                "[WS] Received client message: %s",
-                message.get("event"),
+        
+            client_event = message.get("event")
+        
+            logger.info(
+                "[SIGNALING] Client event received: %s",
+                client_event,
             )
-
-            # Future client-to-backend events can be handled here.
+        
+            if client_event == "ai.playback.started":
+            
+                await connection_manager.handle_runtime_status(
+                    interview_id=interview_id,
+                    status="AI_SPEAKING",
+                )
+        
+            elif client_event == "ai.playback.finished":
+            
+                await connection_manager.handle_runtime_status(
+                    interview_id=interview_id,
+                    status="LISTENING",
+                )
+        
+            else:
+                logger.debug(
+                    "[SIGNALING] Unhandled client event: %s",
+                    client_event,
+                )
 
     except WebSocketDisconnect as exc:
         logger.info(

@@ -4,7 +4,6 @@ const ICE_SERVERS = [
     urls: "stun:stun.l.google.com:19302",
   },
 ];
-let signalingSocket = null;
 
 function waitForIceGatheringComplete(peerConnection, timeout = 15000) {
   if (peerConnection.iceGatheringState === "complete") {
@@ -84,28 +83,29 @@ export function createWebRTCConnection({
 }
 
 
+
 export async function establishWebRTCSession({
   peerConnection,
   interviewId,
   onInterviewEvent,
+  onSignalingSocket,
 }) {
+  let signalingSocket = null;
+
   try {
-    // 4. Create SDP offer.
     const offer = await peerConnection.createOffer();
 
-    // 5. Set local description.
     await peerConnection.setLocalDescription(offer);
 
-    // 6. Wait for ICE gathering.
     await waitForIceGatheringComplete(peerConnection);
 
-    // 7. Exchange SDP and register event handlers.
     const answer = await exchangeSdpOffer(
       interviewId,
       peerConnection.localDescription,
       {
         onSocket: (socket) => {
           signalingSocket = socket;
+          onSignalingSocket?.(socket);
         },
 
         onEvent: (payload) => {
@@ -116,22 +116,46 @@ export async function establishWebRTCSession({
       },
     );
 
-    // 8. Apply remote SDP answer.
     await peerConnection.setRemoteDescription(answer);
 
-    return peerConnection;
+    return {
+      peerConnection,
+      signalingSocket,
+    };
   } catch (error) {
-    closeWebRTCConnection(peerConnection);
+    closeWebRTCConnection(peerConnection, signalingSocket);
     throw error;
   }
 }
 
+export function sendSignalingEvent(socket, event, data = {}) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    console.warn("[SIGNALING] Cannot send event. Socket is not open.");
 
-export function closeWebRTCConnection(peerConnection) {
-  // Close signaling WebSocket independently.
-  if (signalingSocket) {
+    return false;
+  }
+
+  try {
+    socket.send(
+      JSON.stringify({
+        event,
+        data,
+      }),
+    );
+
+    console.log("[SIGNALING] Event sent:", event);
+
+    return true;
+  } catch (error) {
+    console.error("[SIGNALING] Failed to send event:", error);
+
+    return false;
+  }
+}
+
+export function closeWebRTCConnection(peerConnection, signalingSocket) {
+  if (signalingSocket && signalingSocket.readyState !== WebSocket.CLOSED) {
     signalingSocket.close();
-    signalingSocket = null;
   }
 
   if (!peerConnection) return;

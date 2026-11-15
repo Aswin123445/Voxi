@@ -20,8 +20,8 @@ export function exchangeSdpOffer(
     const socket = new WebSocket(signalingUrl);
 
     let answerReceived = false;
+    let settled = false;
 
-    // Expose socket to the caller for lifecycle management.
     onSocket?.(socket);
 
     socket.onopen = () => {
@@ -44,11 +44,11 @@ export function exchangeSdpOffer(
 
         console.log("[WEBSOCKET] Received:", response);
 
-        // Handle SDP answer
         if (response.event === "answer") {
           if (answerReceived) return;
 
           answerReceived = true;
+          settled = true;
 
           resolve({
             sdp: response.sdp,
@@ -58,23 +58,25 @@ export function exchangeSdpOffer(
           return;
         }
 
-        // Handle backend errors
         if (response.event === "error") {
-          const error = new Error(response.message);
+          const error = new Error(
+            response.message || "Signaling server error.",
+          );
 
-          if (!answerReceived) {
+          if (!answerReceived && !settled) {
+            settled = true;
             reject(error);
             socket.close();
             return;
           }
         }
 
-        // Forward interview events to the application
         onEvent?.(response);
       } catch (error) {
         console.error("[WEBSOCKET] Message handling failed:", error);
 
-        if (!answerReceived) {
+        if (!settled) {
+          settled = true;
           reject(error);
           socket.close();
         }
@@ -84,18 +86,27 @@ export function exchangeSdpOffer(
     socket.onerror = (event) => {
       console.error("[SIGNALING] WebSocket error:", event);
 
-      if (!answerReceived) {
+      if (!settled) {
+        settled = true;
         reject(new Error("Unable to connect to signaling server."));
-        socket.close();
       }
     };
 
     socket.onclose = (event) => {
       console.log("[SIGNALING] WebSocket closed:", event.code);
 
-      if (!answerReceived) {
+      if (!settled) {
+        settled = true;
         reject(new Error("WebSocket closed before receiving SDP answer."));
       }
+
+      onEvent?.({
+        event: "signaling.closed",
+        data: {
+          code: event.code,
+          reason: event.reason,
+        },
+      });
     };
   });
 }

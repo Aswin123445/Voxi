@@ -4,18 +4,27 @@ import {
   createWebRTCConnection,
   establishWebRTCSession,
   closeWebRTCConnection,
+  sendSignalingEvent,
 } from "../../services/webrtc/webrtcService";
 
-export function useWebRTC({ interviewId, stream }) {
+export function useWebRTC({ interviewId, stream, onInterviewEvent }) {
   const peerConnectionRef = useRef(null);
+  const signalingSocketRef = useRef(null);
   const attemptRef = useRef(0);
+
+  const onInterviewEventRef = useRef(onInterviewEvent);
 
   const [connectionState, setConnectionState] = useState("new");
   const [iceConnectionState, setIceConnectionState] = useState("new");
   const [remoteStream, setRemoteStream] = useState(null);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
- 
+
+  // Keep the latest event callback without restarting WebRTC.
+  useEffect(() => {
+    onInterviewEventRef.current = onInterviewEvent;
+  }, [onInterviewEvent]);
+
   useEffect(() => {
     console.log("[WEBRTC] Initialization started");
     console.log("[WEBRTC] Interview ID:", interviewId);
@@ -25,7 +34,6 @@ export function useWebRTC({ interviewId, stream }) {
       console.warn("[WEBRTC] Missing interview ID or stream");
       return;
     }
-    if (!interviewId || !stream) return;
 
     const audioTracks = stream.getAudioTracks();
 
@@ -33,11 +41,13 @@ export function useWebRTC({ interviewId, stream }) {
       audioTracks.length === 0 ||
       audioTracks.some((track) => track.readyState !== "live")
     ) {
+      console.warn("[WEBRTC] No active microphone tracks");
       return;
     }
 
     let cancelled = false;
     let peerConnection = null;
+    let signalingSocket = null;
 
     const currentAttempt = ++attemptRef.current;
 
@@ -63,8 +73,11 @@ export function useWebRTC({ interviewId, stream }) {
 
           onRemoteStream: (audioStream) => {
             if (isCurrentAttempt()) {
-              console.log("Remote audio stream received:", audioStream);
-              console.log("Remote audio tracks:", audioStream.getAudioTracks());
+              console.log(
+                "[WEBRTC] Remote audio stream received:",
+                audioStream,
+              );
+
               setRemoteStream(audioStream);
             }
           },
@@ -76,6 +89,22 @@ export function useWebRTC({ interviewId, stream }) {
         await establishWebRTCSession({
           peerConnection,
           interviewId,
+
+          onInterviewEvent: (payload) => {
+            if (isCurrentAttempt()) {
+              onInterviewEventRef.current?.(payload);
+            }
+          },
+
+          onSignalingSocket: (socket) => {
+            if (!isCurrentAttempt()) {
+              closeWebRTCConnection(peerConnection, socket);
+              return;
+            }
+
+            signalingSocket = socket;
+            signalingSocketRef.current = socket;
+          },
         });
 
         if (!isCurrentAttempt()) return;
@@ -84,7 +113,7 @@ export function useWebRTC({ interviewId, stream }) {
       } catch (err) {
         if (!isCurrentAttempt()) return;
 
-        console.error("WebRTC connection failed:", err);
+        console.error("[WEBRTC] Connection failed:", err);
 
         setError(err.message || "Unable to establish WebRTC connection.");
 
@@ -98,24 +127,36 @@ export function useWebRTC({ interviewId, stream }) {
       cancelled = true;
 
       if (peerConnection) {
-        closeWebRTCConnection(peerConnection);
+        closeWebRTCConnection(peerConnection, signalingSocket);
       }
 
       if (peerConnectionRef.current === peerConnection) {
         peerConnectionRef.current = null;
       }
+
+      if (signalingSocketRef.current === signalingSocket) {
+        signalingSocketRef.current = null;
+      }
     };
   }, [interviewId, stream, attempt]);
+
+  // Send events through the existing signaling WebSocket.
+  const sendEvent = useCallback((event, data = {}) => {
+    return sendSignalingEvent(signalingSocketRef.current, event, data);
+  }, []);
 
   const disconnect = useCallback(() => {
     attemptRef.current += 1;
 
     const peerConnection = peerConnectionRef.current;
+    const signalingSocket = signalingSocketRef.current;
 
-    if (peerConnection) {
-      closeWebRTCConnection(peerConnection);
-      peerConnectionRef.current = null;
+    if (peerConnection || signalingSocket) {
+      closeWebRTCConnection(peerConnection, signalingSocket);
     }
+
+    peerConnectionRef.current = null;
+    signalingSocketRef.current = null;
 
     setRemoteStream(null);
     setConnectionState("closed");
@@ -124,6 +165,7 @@ export function useWebRTC({ interviewId, stream }) {
 
   const reconnect = useCallback(() => {
     disconnect();
+
     setError("");
     setAttempt((previous) => previous + 1);
   }, [disconnect]);
@@ -135,5 +177,6 @@ export function useWebRTC({ interviewId, stream }) {
     error,
     disconnect,
     reconnect,
+    sendEvent,
   };
 }

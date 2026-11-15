@@ -46,6 +46,44 @@ class InterviewOrchestrator:
             data=data,
         )
 
+
+    async def publish_runtime_status(
+        self,
+        interview_id: UUID,
+        status: str,
+    ) -> None:
+        async with self.session_factory() as db:
+            conversation_service = ConversationService(db)
+    
+            turn = await conversation_service.get_active_turn(interview_id)
+    
+            if turn is None:
+                logger.warning(
+                    "[ORCHESTRATOR] Cannot publish runtime status; "
+                    "no active turn for interview %s",
+                    interview_id,
+                )
+                return
+    
+            await self.send_event(
+                interview_id=interview_id,
+                event="interview.status",
+                data={
+                    "status": status,
+                    "turn_number": turn.turn_number,
+                    "stage": turn.stage,
+                },
+            )
+    
+            logger.info(
+                "[ORCHESTRATOR] Runtime status published: "
+                "interview=%s status=%s turn=%s stage=%s",
+                interview_id,
+                status,
+                turn.turn_number,
+                turn.stage,
+            )
+
     async def start(self, interview_id: UUID):
 
         # 1. Open a fresh database session
@@ -114,7 +152,6 @@ class InterviewOrchestrator:
         )
 
         return turn
-
 
     def get_next_stage(
         self,
