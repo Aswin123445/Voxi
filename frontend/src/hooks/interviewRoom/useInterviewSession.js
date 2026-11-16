@@ -27,11 +27,7 @@ export function useInterviewSession({
       return ConnectionState.CONNECTED;
     }
 
-    if (
-      rtcConnectionState === "disconnected" ||
-      rtcConnectionState === "failed" ||
-      rtcConnectionState === "closed"
-    ) {
+    if (["disconnected", "failed", "closed"].includes(rtcConnectionState)) {
       return ConnectionState.DISCONNECTED;
     }
 
@@ -50,6 +46,19 @@ export function useInterviewSession({
     console.log("[SESSION] Processing event:", event, data);
 
     switch (event) {
+      case "interview.started":
+      case "question.audio.queued": {
+        if (data.turn_number !== undefined) {
+          setTurnNumber(data.turn_number);
+        }
+
+        if (data.stage !== undefined) {
+          setStage(data.stage);
+        }
+
+        break;
+      }
+
       case "interview.status": {
         const { status, turn_number, stage } = data;
 
@@ -90,6 +99,7 @@ export function useInterviewSession({
         setIsCompleted(true);
         setCompletionData(data);
         setRuntimeStatus(null);
+        setServerError("");
 
         console.log("[SESSION] Interview completed:", data);
         break;
@@ -105,51 +115,47 @@ export function useInterviewSession({
       }
 
       default:
-        // Preserve other domain events for future UI features.
         console.log("[SESSION] Event received:", event);
     }
   }, []);
 
   // Derive conversation state.
-const conversationState = useMemo(() => {
-  if (micError || rtcError || serverError) {
-    return ConversationState.ERROR;
-  }
+  const conversationState = useMemo(() => {
+    if (isCompleted) {
+      return ConversationState.COMPLETED;
+    }
 
-  if (isCompleted) {
-    return ConversationState.COMPLETED;
-  }
+    if (micError || rtcError || serverError) {
+      return ConversationState.ERROR;
+    }
 
-  switch (runtimeStatus) {
-    case "AI_SPEAKING":
-      return ConversationState.AI_SPEAKING;
+    switch (runtimeStatus) {
+      case "AI_SPEAKING":
+        return ConversationState.AI_SPEAKING;
 
-    case "LISTENING":
-      return ConversationState.LISTENING;
+      case "LISTENING":
+        return ConversationState.LISTENING;
 
-    case "CANDIDATE_SPEAKING":
-      return ConversationState.CANDIDATE_SPEAKING;
+      case "CANDIDATE_SPEAKING":
+        return ConversationState.CANDIDATE_SPEAKING;
 
-    case "PROCESSING":
-      return ConversationState.PROCESSING;
+      case "PROCESSING":
+        return ConversationState.PROCESSING;
 
-    default:
-      return ConversationState.CONNECTING;
-  }
-}, [micError, rtcError, serverError, isCompleted, runtimeStatus]);
+      default:
+        return ConversationState.CONNECTING;
+    }
+  }, [isCompleted, micError, rtcError, serverError, runtimeStatus]);
 
   return {
     connectionState,
     conversationState,
-
     runtimeStatus,
     turnNumber,
     stage,
-
     isCompleted,
     completionData,
     serverError,
-
     handleInterviewEvent,
   };
 }

@@ -1,5 +1,7 @@
 from uuid import UUID
-
+from app.services.interview_service import InterviewService
+from app.enums.interview_status import InterviewStatus
+from fastapi import HTTPException, status
 from app.repositories.interview_evaluation_repository import (
     InterviewEvaluationRepository,
 )
@@ -10,7 +12,7 @@ class InterviewEvaluationService:
     def __init__(
         self,
         db,
-        interview_evaluator,
+        interview_evaluator = None,
     ):
         self.db = db
         self.interview_evaluator = interview_evaluator
@@ -53,6 +55,45 @@ class InterviewEvaluationService:
 
         # 6. Return final evaluation
         return final_evaluation
+
+
+    async def get_interview_results(self, interview_id: UUID):
+
+        # 1. Verify that the interview exists.
+        interview_service = InterviewService(self.db)
+
+        interview = await interview_service.get_interview(
+            interview_id=interview_id,
+        )
+
+        # 2. Ensure the interview is completed.
+        interview_status = getattr(interview.status, "value", interview.status)
+
+        if interview_status != InterviewStatus.COMPLETED.value:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Interview has not been completed yet.",
+            )
+
+        # 3. Retrieve the persisted evaluation.
+        evaluation = await self.repository.get_by_interview_id(
+            interview_id=interview_id,
+        )
+
+        if evaluation is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Interview evaluation not found.",
+            )
+
+        # 4. Verify evaluation completion.
+        if evaluation.status != "COMPLETED":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Interview evaluation is not ready yet.",
+            )
+
+        return evaluation
 
     def _validate_turns(self, turns):
 

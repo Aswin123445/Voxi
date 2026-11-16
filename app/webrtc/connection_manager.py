@@ -35,6 +35,34 @@ class ConnectionManager:
         orchestrator: InterviewOrchestrator,
     ) -> None:
         self.interview_orchestrator = orchestrator
+
+    async def handle_playback_event(
+        self,
+        interview_id: UUID,
+        event: str,
+        batch_id: UUID,
+        turn_number: int,
+    ) -> None:
+        if self.interview_orchestrator is None:
+            raise RuntimeError("InterviewOrchestrator is not initialized")
+        if event == "ai.playback.started":
+            await self.interview_orchestrator.handle_playback_started(
+                interview_id=interview_id,
+                batch_id=batch_id,
+                turn_number=turn_number,
+            )
+
+        elif event == "ai.playback.finished":
+            await self.interview_orchestrator.handle_playback_finished(
+                interview_id=interview_id,
+                batch_id=batch_id,
+                turn_number=turn_number,
+            )
+        else:
+            logger.warning(
+                "[CONNECTION MANAGER] Unsupported playback event: %s",
+                event,
+            )
     async def handle_transcript(
         self,
         interview_id: UUID,
@@ -75,34 +103,53 @@ class ConnectionManager:
         # Audio receiver creation
         # --------------------------------------------------
 
-
     def create_audio_receiver(
         self,
         interview_id: UUID,
     ) -> AudioReceiver:
-    
+
         async def on_transcript(transcript: str):
             await self.handle_transcript(
                 interview_id=interview_id,
                 transcript=transcript,
             )
-    
+
         async def on_runtime_status(status: str):
             await self.handle_runtime_status(
                 interview_id=interview_id,
                 status=status,
             )
-    
+
         receiver = AudioReceiver(
             stt_service=self.stt_service,
             on_transcript=on_transcript,
             on_runtime_status=on_runtime_status,
         )
-    
+
         self.audio_receivers[interview_id] = receiver
-    
+
         return receiver
-    
+    async def handle_audio_batch_drained(
+        self,
+        interview_id: UUID,
+        batch_id: UUID,
+        turn_number: int,
+        stage: str,
+    ) -> None:
+
+        if self.interview_orchestrator is None:
+            logger.warning(
+                "[CONNECTION MANAGER] Cannot publish audio batch drained. "
+                "InterviewOrchestrator is not initialized."
+            )
+            return
+
+        await self.interview_orchestrator.handle_audio_batch_drained(
+            interview_id=interview_id,
+            batch_id=batch_id,
+            turn_number=turn_number,
+            stage=stage,
+        )
     def on_audio_task_done(
         self,
         task: asyncio.Task,
@@ -287,6 +334,19 @@ class ConnectionManager:
 
         if interview_id in self.outgoing_audio_tracks:
             raise ValueError("Outgoing audio track already exists for this interview.")
+        async def on_batch_drained(
+            batch_id: UUID,
+            turn_number: int,
+            stage: str,
+        ):
+            await self.handle_audio_batch_drained(
+                interview_id=interview_id,
+                batch_id=batch_id,
+                turn_number=turn_number,
+                stage=stage,
+            )
+
+        audio_track.on_batch_drained = on_batch_drained
 
         peer_connection.addTrack(audio_track)
 
@@ -301,6 +361,9 @@ class ConnectionManager:
         self,
         interview_id: UUID,
         frames,
+        batch_id: UUID,
+        turn_number: int,
+        stage: str,
     ) -> None:
 
         audio_track = self.outgoing_audio_tracks.get(interview_id)
@@ -310,9 +373,17 @@ class ConnectionManager:
                 f"Outgoing audio track not found for interview: {interview_id}"
             )
 
-        audio_track.add_frames(frames)
+        audio_track.add_frames(
+            frames=frames,
+            batch_id=batch_id,
+            turn_number=turn_number,
+            stage=stage,
+        )
 
         logger.info(
-            "[CONNECTION MANAGER] Audio queued for interview: %s",
+            "[CONNECTION MANAGER] Audio queued: " "interview=%s batch=%s turn=%s stage=%s",
             interview_id,
+            batch_id,
+            turn_number,
+            stage,
         )

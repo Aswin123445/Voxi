@@ -4,7 +4,7 @@ import MainLayout from "./layouts/MainLayout";
 import CreateInterview from "./pages/CreateInterview";
 import InterviewPreparation from "./pages/InterviewPreparation";
 import InterviewRoom from "./pages/InterviewRoom";
-
+import InterviewResults from "./pages/InterviewResults";
 
 function App() {
   return (
@@ -19,17 +19,15 @@ function App() {
             path="/interviews/:interviewId/prepare"
             element={<InterviewPreparation />}
           />
-
-          <Route
-            path="/interviews/:interviewId/room"
-            element={<InterviewRoom />}
-          />
-
-          {/* <Route
-            path="/interviews/:interviewId/results"
-            element={<InterviewResults />}
-          /> */}
         </Route>
+        <Route
+          path="/interviews/:interviewId/room"
+          element={<InterviewRoom />}
+        />
+        <Route
+          path="/interviews/:interviewId/results"
+          element={<InterviewResults />}
+        />
       </Routes>
     </BrowserRouter>
   );

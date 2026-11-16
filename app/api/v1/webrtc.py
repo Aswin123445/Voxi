@@ -83,9 +83,17 @@ async def webrtc_signaling(
         )
 
         # 4. Keep WebSocket alive for interview events
+
         while True:
             message = await websocket.receive_json()
         
+            if not isinstance(message, dict):
+                await websocket.send_json({
+                    "event": "error",
+                    "message": "Invalid WebSocket message.",
+                })
+                continue
+            
             client_event = message.get("event")
         
             logger.info(
@@ -93,18 +101,45 @@ async def webrtc_signaling(
                 client_event,
             )
         
-            if client_event == "ai.playback.started":
-            
-                await connection_manager.handle_runtime_status(
-                    interview_id=interview_id,
-                    status="AI_SPEAKING",
-                )
+            if client_event in (
+                "ai.playback.started",
+                "ai.playback.finished",
+            ):
+                data = message.get("data")
         
-            elif client_event == "ai.playback.finished":
-            
-                await connection_manager.handle_runtime_status(
+                if not isinstance(data, dict):
+                    await websocket.send_json({
+                        "event": "error",
+                        "message": "Invalid playback event data.",
+                    })
+                    continue
+                
+                batch_id_raw = data.get("batch_id")
+                turn_number = data.get("turn_number")
+        
+                # Validate batch UUID
+                try:
+                    batch_id = UUID(batch_id_raw)
+                except (ValueError, TypeError, AttributeError):
+                    await websocket.send_json({
+                        "event": "error",
+                        "message": "Invalid batch_id.",
+                    })
+                    continue
+                
+                # Validate turn number (bool is also an int in Python)
+                if isinstance(turn_number, bool) or not isinstance(turn_number, int):
+                    await websocket.send_json({
+                        "event": "error",
+                        "message": "Invalid turn_number.",
+                    })
+                    continue
+                
+                await connection_manager.handle_playback_event(
                     interview_id=interview_id,
-                    status="LISTENING",
+                    event=client_event,
+                    batch_id=batch_id,
+                    turn_number=turn_number,
                 )
         
             else:
@@ -112,7 +147,7 @@ async def webrtc_signaling(
                     "[SIGNALING] Unhandled client event: %s",
                     client_event,
                 )
-
+        
     except WebSocketDisconnect as exc:
         logger.info(
             "[WS] Client disconnected. Interview: %s, Code: %s",
