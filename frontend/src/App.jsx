@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import MainLayout from "./layouts/MainLayout";
 import CreateInterview from "./pages/CreateInterview";
 import InterviewPreparation from "./pages/InterviewPreparation";
-import InterviewRoom from "./pages/InterviewRoom";
+import InterviewRoom from "./pages/interviewRoom";
 import InterviewResults from "./pages/InterviewResults";
 
 function App() {
