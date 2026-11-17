@@ -35,6 +35,27 @@ class ConnectionManager:
         orchestrator: InterviewOrchestrator,
     ) -> None:
         self.interview_orchestrator = orchestrator
+    def set_audio_accepting(
+        self,
+        interview_id: UUID,
+        enabled: bool,
+    ) -> None:
+        receiver = self.audio_receivers.get(interview_id)
+    
+        if receiver is None:
+            logger.warning(
+                "[CONNECTION MANAGER] Audio receiver not found for %s",
+                interview_id,
+            )
+            return
+    
+        receiver.set_audio_accepting(enabled)
+    
+        logger.info(
+            "[CONNECTION MANAGER] Audio acceptance set to %s for %s",
+            enabled,
+            interview_id,
+        )
 
     async def handle_playback_event(
         self,

@@ -32,6 +32,23 @@ class AudioReceiver:
 
         self.utterance_queue = asyncio.Queue(maxsize=5)
         self.utterance_worker_task = None
+        self.accepting_audio = False
+
+    def set_audio_accepting(self, enabled: bool) -> None:
+        if self.accepting_audio == enabled:
+            return
+
+        self.accepting_audio = enabled
+
+        # Clear audio accumulated during the previous state.
+        self.audio_buffer.clear()
+        self.audio_chunker.clear()
+        self.vad_service.reset()
+
+        logger.info(
+            "[AUDIO RECEIVER] Audio acceptance changed: %s",
+            "ENABLED" if enabled else "DISABLED",
+        )
 
     async def publish_runtime_status(self, status: str) -> None:
         if self.on_runtime_status is None:
@@ -152,6 +169,9 @@ class AudioReceiver:
 
                 if processed_audio.size == 0:
                     continue
+                # Ignore candidate audio outside the listening window.
+                if not self.accepting_audio:
+                    continue
 
                 # 3. Continuously store audio for pre-roll and recording.
                 self.audio_buffer.append(processed_audio)
@@ -167,6 +187,8 @@ class AudioReceiver:
                         self.vad_service.process_chunk,
                         chunk,
                     )
+                    if not self.accepting_audio:
+                        continue
 
                     if not event:
                         continue
@@ -187,13 +209,12 @@ class AudioReceiver:
                             "[AUDIO RECEIVER] Speech ended: %s",
                             event,
                         )
-
                         # Finalize and retrieve the complete utterance.
                         audio_segment = self.audio_buffer.stop_recording()
+                        self.set_audio_accepting(False)
 
                         if audio_segment is not None and audio_segment.size > 0:
                             await self.schedule_utterance(audio_segment)
-                            await self.publish_runtime_status("PROCESSING")
 
         except MediaStreamError:
             logger.warning(
@@ -208,55 +229,55 @@ class AudioReceiver:
             )
 
         finally:
+            if self.accepting_audio:
+                # Flush remaining samples from the resampler.
+                remaining_audio = self.audio_processor.flush()
 
-            # 6. Flush remaining samples from the resampler.
-            remaining_audio = self.audio_processor.flush()
+                if remaining_audio.size > 0:
+                    self.audio_buffer.append(remaining_audio)
+                    chunks = self.audio_chunker.add_audio(remaining_audio)
 
-            if remaining_audio.size > 0:
+                    for chunk in chunks:
+                        vad_chunk_count += 1
 
-                self.audio_buffer.append(remaining_audio)
+                        event = await asyncio.to_thread(
+                            self.vad_service.process_chunk,
+                            chunk,
+                        )
 
-                chunks = self.audio_chunker.add_audio(remaining_audio)
+                        # The audio gate may have changed while VAD was running.
+                        if not self.accepting_audio:
+                            break
 
-                # Process complete chunks produced by the flush.
-                for chunk in chunks:
+                        if not event:
+                            continue
 
-                    vad_chunk_count += 1
+                        if "start" in event:
+                            await self.publish_runtime_status("CANDIDATE_SPEAKING")
+                            self.audio_buffer.start_recording()
 
-                    event = await asyncio.to_thread(
-                        self.vad_service.process_chunk,
-                        chunk,
-                    )
+                        elif "end" in event:
+                            audio_segment = self.audio_buffer.stop_recording()
+                            self.set_audio_accepting(False)
 
-                    if not event:
-                        continue
+                            if audio_segment is not None and audio_segment.size > 0:
+                                logger.info("[AUDIO RECEIVER] Final utterance detected")
+                                await self.schedule_utterance(audio_segment)
 
-                    if "start" in event:
-                        await self.publish_runtime_status("CANDIDATE_SPEAKING")
-                        self.audio_buffer.start_recording()
+                # Finalize an active utterance if the track ends
+                # before VAD detects sufficient trailing silence.
+                if self.accepting_audio:
+                    audio_segment = self.audio_buffer.stop_recording()
 
-                    elif "end" in event:
-
-                        audio_segment = self.audio_buffer.stop_recording()
-
-                        if audio_segment is not None and audio_segment.size > 0:
-
-                            logger.info("[AUDIO RECEIVER] Final utterance detected")
-
-                            await self.schedule_utterance(audio_segment)
-
-            # Finalize an active utterance if the track ends
-            # before VAD detects sufficient trailing silence.
-            audio_segment = self.audio_buffer.stop_recording()
-
-            if audio_segment is not None and audio_segment.size > 0:
-
-                logger.info("[AUDIO RECEIVER] Finalizing remaining utterance")
-
-                await self.schedule_utterance(audio_segment)
+                    if audio_segment is not None and audio_segment.size > 0:
+                        logger.info("[AUDIO RECEIVER] Finalizing remaining utterance")
+                        self.set_audio_accepting(False)
+                        await self.schedule_utterance(audio_segment)
+            else:
+                self.audio_buffer.clear()
 
             await self.utterance_queue.join()
-            # Wait for all pending transcription and callback tasks.
+
             if self.utterance_worker_task is not None:
                 self.utterance_worker_task.cancel()
 

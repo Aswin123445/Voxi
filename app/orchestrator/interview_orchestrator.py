@@ -72,6 +72,10 @@ class InterviewOrchestrator:
             return
 
         batch.listening_published = True
+        self.connection_manager.set_audio_accepting(
+            interview_id=interview_id,
+            enabled=True,
+        )
 
         await self.send_event(
             interview_id=interview_id,
